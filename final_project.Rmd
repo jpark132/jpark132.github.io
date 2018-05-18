@@ -1,0 +1,227 @@
+---
+title: "An analysis on bitcoin volatility"
+author: "Joon Park"
+date: "May 17, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+##Introduction
+This past year a new craze swept the nation. Cryptocurrency trading has peaked in 2017 and still continues
+to grow in 2018. With all the millions being made many have tried speculating on when a cryptocurrency will
+"moon". Today I hope to collect data and analyze various factors of a particular cryptocurrency called bitcoin 
+which has attracted the most attention due to the enormous gains it has made in value. I hope that you enjoy the analysis.
+
+##Libraries
+Please install these libraries before we begin
+broom
+stringr
+lubridate
+tidyverse
+ggplot2
+zoo
+
+#Data curation/Tidying
+
+To begin we must first obtain the data on the cryptocurrency we want to view. This can be accessed through Kaggle
+https://www.kaggle.com/jessevent/all-crypto-currencies. This data is saved as a csv file and so I use R's read_csv
+function to obtain the data and store it in a dataframe I named crypto_data. This data is data recorded on daily cryptocurrency open and close prices on coin exchanges for many coins including Bitcoin. 
+```{r obtaining data}
+library(stringr)
+library(tidyverse)
+
+crypto_data <- read_csv("crypto-markets.csv")
+crypto_data %>% head()
+```
+
+Before we begin analyzing the data we must first "tidy" the dataframe.This data is data recorded for  There are a lot of unwanted variables and data on coins that are not necessary for our analysis included in the dataset.
+First we filter our data to include rows that only contain information about Bitcoin.
+```{r tidying data_1}
+library(ggplot2)
+library(lubridate)
+
+## filtering only the data on bitcoin
+bitcoin_data <- crypto_data %>% 
+                filter(name == "Bitcoin") 
+bitcoin_data %>% head()
+  
+
+```
+
+Now we have the data we need, but our dataframe still has unnecessary columns that clutter up our dataframe.
+```{r tidying data_2}
+## selecting only the columns that are necessary to our analysis
+bitcoin_data <- bitcoin_data %>% select(name,open,close,high,low,date,volume,market)
+bitcoin_data
+```
+Luckily for us most of the data is already tidy (e.g no missing values) however the format of date is not uniform which can cause a few problems when trying to plot as a graph from there we can just select the columns that are of value to us.
+```{r tidying data_3}
+
+##converting the date to a uniform format so R can recognize it easily
+bitcoin_data$date <- as.Date(bitcoin_data$date,"%m/%d/%Y")
+
+##creating a new column in the dataframe called year 
+bitcoin_data <- bitcoin_data %>% mutate(year = year(date)) %>%
+                 select(name,open,close,high,low,date,year,market,volume)
+bitcoin_data
+
+```
+
+#Exploratory Data Analysis
+Now that most of the data is cleaned we can get an initial picture of our data and what it looks like
+```{r data visualization}
+
+## creating a graph of opening prices over time
+bitcoin_data %>% 
+                  ggplot()+
+                  geom_line(aes(x=date,y=open),color='black')+
+                  xlab("Time in days")+
+                  ylab("price in USD") +
+                  ggtitle("Bitcoin opening price over time")
+
+
+```
+
+judging from the graph it seems pretty obvious that Bitcoin made it's breakthrough around the mid 2017 year. Our goal for this data is to determine what factors were a big part of this jump and how important these factors are.
+To start let's go over a metric used in stock prediction called rolling averages.
+ROlling or moving averages are averages calculated over a defined number of time periods for example in the code below we determine two different rolling averages over the course of Bitcoin's trading history. One is the 30 day rolling average and the other is a 60 day rolling average. Both take the average opening price over their specified time period more information can be found in this link.https://www.investopedia.com/terms/m/movingaverage.asp
+
+
+```{r data transformations}
+library(zoo)
+updated_btc_data <- bitcoin_data %>%
+  
+  ##create a new column for both 30 day and 60 day rolling averages by using zoo's built in function
+                    mutate(thirty_r_avg = rollmean(bitcoin_data$open,30,fill = NA, align = "right")) %>%
+                    mutate(sixty_r_avg = rollmean(bitcoin_data$open,60,fill = NA, align = "right")) %>%
+                    select(name,open,close,high,market,low,date,thirty_r_avg,sixty_r_avg,volume) 
+
+```
+ROlling averages are important for finding general trends of a stock and how well it performs over time as it takes the average over a certain period of time.
+```{r plot of Bitcoin rolling averages}
+    updated_btc_data %>% ggplot(aes (x = date),color= factor() )+
+                    geom_line(aes(y=open),color = 'black') +
+                    geom_line(aes(y=thirty_r_avg),color='red') +
+                    geom_line(aes(y=sixty_r_avg),color = 'green') +
+                    xlab("date") +
+                    ylab("price in US dollars") +
+                    ggtitle("Rolling averages")
+
+```
+
+The plot above shows the opening prices of Bitcoin over time followed by the 30 day rolling average in red and 60 day rolling average in green however it might be a bit hard to see over the entire time series so let's zoom in a little.
+This plot shows over the data over the time period of 2017.
+```{r plot showing date vs time and rolling averages }
+
+#filtering by year to make the plot more zoomed in
+sample_size <- updated_btc_data %>% 
+                filter(year(date) == 2017)
+
+sample_size %>% ggplot()+
+                    geom_line(aes(x=date,y=open),color = 'black') +
+                    geom_line(aes(x=date,y=thirty_r_avg),color='red') +
+                    geom_line(aes(x=date,y=sixty_r_avg),color = 'green') +
+                    xlab("date") +
+                    ylab("price in US dollars") +
+                    ggtitle("Rolling averages in 2017")
+```
+The rolling averages correlates strongly with the actual open price and can be useful for interpreting trends. For example in the plot above whenever the red lines overtake the green lines it means the short term growth is larger than the long term growth. Vice versa if the red lines are below the green lines it means the long term growth is performing better than the short term.
+
+Rolling Averages tell general trends however they aren't entirely useful when considering something as volatile as cryptocurrency. Unlike stocks, cryptocurrency is a lot more volatile in terms of price, which begs the question how do we measure this volatility ?
+
+To measure volatility we can take the difference between the high and low and have that act as the range of the price for that day.
+```{r plot to see fluctuations}
+
+#creating a new column called flucutation which is the absolute value of the range 
+fluctuations_df <- updated_btc_data %>%
+                mutate(fluctuation = abs(high - low)) %>%
+                select(name,open,close,high,volume,low,date,fluctuation)
+
+```
+Now that we have the fluctuations lets see what it looks like.
+```{r plotting fluctuations}
+fluctuations_df %>% ggplot(aes(x=date,y=fluctuation)) +
+                    geom_point()
+```
+This plot looks very similar to the opening price plot that was shown at the very beginning of this tutorial which indicates that there might be a very strong correlation there.Now we can ask the question what is causing all this volatility? To be honest it could be anything, market capitalization, Trump becoming president, pump and dump due to lack of regulation, etc etc, but for the purpose of this data analysis let's focus more on the attributes that we can measure from the data, for example market capitalization.
+
+Market capitalization is a measure of how big a certain company or stock is (in this case it's crypto). More information and definitions can be found here https://www.investopedia.com/articles/basics/03/031703.asp. This is very important as many beginning crypto traders simply rank coins by price without looking at their value in relation to market capitalization.
+
+Like in the case of volatility, market cap seems to follow an incredibly similar trend to opening price.
+```{r market cap}
+
+bitcoin_data %>% 
+              ggplot(aes(x=date,y=market))+
+  
+              ## creates a line graph 
+              geom_line() +
+  
+              ##formatting to display correct labels
+              scale_y_continuous(labels = scales::comma)
+```
+
+There seems to be striking similarities between the market capitalization, volatility, and opening price of this data. I believe that there is a correlation between all of these variables and volume which accounts for the stated similarities.
+Plotting it also helps to show the correlation.
+```{r plotting volume}
+
+##plotting volume over time
+bitcoin_data %>% 
+              ggplot(aes(x=date,y=volume))+
+              geom_line() +
+              scale_y_continuous(labels = scales::comma)
+```
+
+#Hypothesis testing
+To test our initial hypothesis that there is a correlation between 2 columns we are going to use a linear regression model. Linear regression is a powerful technique that allows us to test the strength of a relationship between two attributes. We will focus mainly on volume and volatility
+Lets start with volume and volatility.
+Our null hypothesis is that there is no correlation between volume and volatility while conversely our alternative hypothesis is that there is a definable correlation between volume and volatility
+```{r Hypothesis testing }
+##fitting the linear regression model with the interaction of volatility and volume then using tidy to clean it up.
+r1 <- lm(fluctuation~volume,data =fluctuations_df)
+broom::tidy(r1)
+```
+Reading a linear model summary is difficult but this link helps explain in somewhat simple terms https://feliperego.github.io/blog/2015/10/23/Interpreting-Model-Output-In-R. This shows somenteresting data as the seems to have a positive relationship. The first intercept (intercept) is the expected value of the fluctuation per volume when taking in the average volume of all the days in our dataset. Or in a simpler explanation, There is an increase of about 1.417435e+01 in fluctuation per volume trade increase. While for every increase in fluctuation there seems to be an increase in volume by 1.251812e-07. This could be due to the concentration of data on the lower end of market capitalization and fluctuation. To further analyze the relationship between these 2 variables we have to summarize the data.
+
+```{r augmenting the linear model}
+library(broom)
+
+#summarizing the data and displaying it
+summarized_r1 <- r1 %>% summary()
+
+summarized_r1
+```
+Here we try to see just how well our linear model was fit.  What we are focusing on for now is the residual standard error which lets us know how well our model was fit. In our case our r squared was .6607 or around 66% of the variance could be explained through our data. 
+```{r fluctuation lm graph}
+
+fluctuations_df %>% ggplot(aes(x=volume,y=fluctuation)) +
+                    geom_point() +
+                    geom_smooth(method =lm) +
+                    scale_colour_gradient(low = "black", high = "blue")+
+                    scale_x_continuous(labels = scales::comma) +
+                    ggtitle("Volatility over volume")
+          
+
+```
+
+By looking at the model we can definitely infer that there is a correlation between volume and fluctuation however it was smaller than expected. This could be due to skewed data as a larger portion of recorded results seem to be on the lower end of the graph 
+
+Looking back on our r1 we can see that our p-value is much less than the standard significance level at .05 and can confidently say that there is a correlation between volume and volatility.
+```{r linear regression}
+summarized_r1
+```
+
+
+
+
+#closing remarks 
+Overall we were able to determine that the increase in volume affected the massive volatility seen in the more recent times of the crypto craze. We went through very briefly some of the topics that encompass data science and the manipulation of data. I hope you enjoyed more detail on these topics are available below.
+
+A couple of references :
+Kaggle Datasets https://www.kaggle.com/datasets 
+Investopedia https://www.investopedia.com/
+Crypto volatility: https://www.cryptocompare.com/coins/guides/5-things-you-need-to-know-about-bitcoin-volatility/
+basic r functions/tidying : https://rpubs.com/bradleyboehmke/data_wrangling
+plotting: https://tutorials.iq.harvard.edu/R/Rgraphics/Rgraphics.html
+
